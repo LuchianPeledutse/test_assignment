@@ -13,3 +13,11 @@
 Запуск программы
 ---
 1. Убедитесь, что видео crowd.mp4 находится в том же месте, что и py_program.py файл.
+2. Перейдите в командную строку и загрузите необходимые библиотеки, названия которых находятся в файле requirements.txt.
+```bash
+pip install -r requirements.txt
+```
+3. Запустите скрипт py_program.py используя Python
+```bash
+python py_program.py
+```
