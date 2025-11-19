@@ -20,9 +20,4 @@ pip install -r requirements.txt
 3. Запустите скрипт **py_program.py** используя Python
 ```bash
 python py_program.py
-```
-или 
-```bash
-python3 py_program.py
-```
-В зависимости от того используете ли вы Python изолированно или глобально
+``` 
