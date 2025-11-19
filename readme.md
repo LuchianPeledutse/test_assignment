@@ -20,4 +20,6 @@ pip install -r requirements.txt
 3. Запустите скрипт **py_program.py** используя Python
 ```bash
 python py_program.py
-``` 
+```
+В коммандной строке должен появится процесс создания видео (примерно занимает 4 минуты)
+![Execution](./images/program_picture.png)  
