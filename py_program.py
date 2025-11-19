@@ -20,7 +20,7 @@ class VideoReader:
     video_path : str, default='./crowd.mp4'
         System path for video reading
 
-    img_resize : int, default=640
+    img_resize : int, default=1280
         Size to resize image
 
     Attributes
@@ -40,7 +40,7 @@ class VideoReader:
     transforms : torchvision.transforms.Resize
         Transform for image resizing
     """
-    def __init__(self, video_path: str = 'crowd.mp4', img_resize: int = 640):
+    def __init__(self, video_path: str = 'crowd.mp4', img_resize: int = 1088):
         self.video_capture = cv2.VideoCapture(video_path)
         # Saving image characteristics to use for later video writing
         self.height = int(self.video_capture.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -59,6 +59,7 @@ class VideoReader:
             Frame presence flag
         
         tensor_img : torch.Tensor
+            Original Numpy image
             Tensor image
         """
         # Creating generator to return video frames
@@ -68,12 +69,11 @@ class VideoReader:
             if not ret:
                 break
             # Image processing to fit the frame to model input
-            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            tensor_img = torch.from_numpy(rgb_frame).permute(2, 0, 1)
+            tensor_img = torch.from_numpy(frame).permute(2, 0, 1)
             tensor_img = tensor_img.unsqueeze(dim=0).float() / 255.0
             tensor_img = self.transforms(tensor_img)
 
-            yield tensor_img
+            yield frame, tensor_img
     
     def release(self) -> None:
         """Releases the video after it is read"""
@@ -144,16 +144,23 @@ class ImageRecDrawing:
 
     Parameters
     ----------
-    to_size : tuple[int, int]
-        Image (width, height) to resize final video frame output to 
+    picture_size : tuple[int, int]
+        Video writing image (width, height) for final video frame output
+    
+    model_picture_size : tuple[int, int]
+        Model image (width, height) to scale coordinates
 
     Attributes
     ----------
-    to_size : tuple[int, int]
+    picture_size : tuple[int, int]
         Image (width, height) to resize final video frame output to 
+    
+    model_picture_size : tuple[int, int]
+        Model image (width, height) to scale coordinates
     """
-    def __init__(self, to_size: tuple[int, int] | None = None):
-        self.to_size = to_size
+    def __init__(self, picture_size: tuple[int, int], model_picture_size: tuple[int, int]):
+        self.picture_size = picture_size
+        self.model_picture_size = model_picture_size
     
     def draw(self, picture, prediction) -> np.ndarray:
         """
@@ -172,20 +179,20 @@ class ImageRecDrawing:
         picture : np.ndarray
             Array picture ready to be written to RGB video
         """
+        scale_x = self.picture_size[0] / self.model_picture_size[0]
+        scale_y = self.picture_size[1] / self.model_picture_size[1]
+
         label = prediction[1]
         confidence = prediction[2]
         bounding_box = prediction[0]
 
-        pt1 = bounding_box[0], bounding_box[1]
-        pt2 = bounding_box[2], bounding_box[3]
+        pt1 = int(bounding_box[0]*scale_x), int(bounding_box[1]*scale_y)
+        pt2 = int(bounding_box[2]*scale_x), int(bounding_box[3]*scale_y)
 
         cv2.rectangle(picture, pt1, pt2, (128, 255, 52), 1)
         cv2.putText(picture, f"{label} {confidence}",
-                    (bounding_box[0], bounding_box[1]-5),
-                    cv2.FONT_ITALIC, 0.25, (15, 15, 97), 1)
-
-        if self.to_size:
-            picture = cv2.resize(picture, self.to_size)
+                    (int(bounding_box[0]*scale_x), int(bounding_box[1]*scale_y)-5),
+                    cv2.FONT_ITALIC, 0.75, (15, 15, 97), 2)
             
         return picture
     
@@ -209,6 +216,9 @@ class ModelLoad:
     
     verbose : bool
         Flag to print model inference information
+
+    imgsz : int
+        A size to square a frame to before passing to model
     
     Attributes
     ----------
@@ -226,14 +236,18 @@ class ModelLoad:
     
     include_classes : list
         A list of classes to include in predictions result
+
+    imgsz : int
+        A size to square a frame to before passing to model
     """
     def __init__(self, confidence: float = 0.5, save_img_flag: bool = False,
-                 include_classes: list = ['person'], verbose: bool = False):
+                 include_classes: list = ['person'], verbose: bool = False, imgsz=640):
         self.model = YOLO("yolo11l.pt")
         self.confidence = confidence
         self.save_img_flag = save_img_flag
         self.include_classes = include_classes
         self.verbose = verbose
+        self.imgsz = imgsz
     
     def predict(self, picture: torch.Tensor) -> tuple[
         np.ndarray,
@@ -258,9 +272,9 @@ class ModelLoad:
         prediction = self.model(picture, 
                                 save=self.save_img_flag, 
                                 conf=self.confidence, 
-                                verbose=self.verbose)
+                                verbose=self.verbose,
+                                imgsz=self.imgsz)
         # Peparing variables to store data
-        numpy_picture = None
         detected_objects = []
 
         for box in prediction[0].boxes:
@@ -268,18 +282,12 @@ class ModelLoad:
             x1, y1, x2, y2 = box.xyxy[0].to(dtype=torch.int).tolist()
             label = self.model.names[int(box.cls[0])]
 
-            if numpy_picture is None:
-                numpy_picture = prediction[0].orig_img
-
             # Adding only predictions included in list classes to exclude others
             if label in self.include_classes:
                 detection_tuple = ((x1, y1, x2, y2), label, round(conf, 2))
                 detected_objects.append(detection_tuple)
 
-        # Returning picture in RGB numpy format
-        return_picture = cv2.cvtColor(numpy_picture, cv2.COLOR_BGR2RGB)
-
-        return return_picture, detected_objects
+        return detected_objects
 
 
 def make_video() -> None:
@@ -296,20 +304,19 @@ def make_video() -> None:
     -------
     None
     """
-    model = ModelLoad()
-    videoReader = VideoReader(video_path='crowd.mp4')
+    model = ModelLoad(imgsz=640)
+    videoReader = VideoReader(video_path='crowd.mp4', img_resize=640)
     videoSaver = VideoSaver(videoReader.fps, videoReader.width, videoReader.height)
-    imgDraw = ImageRecDrawing(to_size=(videoReader.width, videoReader.height))
-    
+    imgDraw = ImageRecDrawing(picture_size=(videoReader.width, videoReader.height), model_picture_size=(640, 640))
     video_frames = videoReader.generate_frames()
     
-    for frame in tqdm(video_frames, desc='Writing the video'):
-        numpy_picture, detected_objects = model.predict(frame)
+    for numpy_frame, tensor_frame in tqdm(video_frames, desc='Writing the video'):
+        detected_objects = model.predict(tensor_frame)
         
         for obj in detected_objects:
-            numpy_picture = imgDraw.draw(numpy_picture, obj)
+            numpy_frame = imgDraw.draw(numpy_frame, obj)
         
-        videoSaver.add_frame(numpy_picture)
+        videoSaver.add_frame(numpy_frame)
     
 
     videoReader.release()
