@@ -22,4 +22,5 @@ pip install -r requirements.txt
 python py_program.py
 ```
 В коммандной строке должен появится процесс создания видео (примерно занимает 4 минуты)
-![Execution](./images/program_picture.png)  
+![Execution](./images/program_picture.png)
+4. В рабочей директории должно появится видео **videoWithBoundingBoxes.mp4** 
